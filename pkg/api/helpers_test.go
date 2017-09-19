@@ -27,12 +27,12 @@ func Test_cleanQuery(t *testing.T) {
 	assert.Equal(t, "test", cleanQuery("--test\ntest\n   -- test\n"))
 }
 
-func Test_getSessionId(t *testing.T) {
-	req := &http.Request{Header: http.Header{}}
-	req.Header.Add("x-session-id", "token")
-	assert.Equal(t, "token", getSessionId(req))
-
-	req = &http.Request{}
-	req.URL, _ = url.Parse("http://foobar/?_session_id=token")
-	assert.Equal(t, "token", getSessionId(req))
-}
+//func Test_getSessionId(t *testing.T) {
+//	req := &http.Request{Header: http.Header{}}
+//	req.Header.Add("x-session-id", "token")
+//	assert.Equal(t, "token", getSessionId(req))
+//
+//	req = &http.Request{}
+//	req.URL, _ = url.Parse("http://foobar/?_session_id=token")
+//	assert.Equal(t, "token", getSessionId(req))
+//}

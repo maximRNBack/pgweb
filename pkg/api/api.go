@@ -23,13 +23,13 @@ var (
 
 func DB(c *gin.Context) *client.Client {
 	if command.Opts.Sessions {
-		return DbSessions[getSessionId(c.Request)]
+		return DbSessions[getSessionId(c)]
 	} else {
 		return DbClient
 	}
 }
 
-func setClient(c *gin.Context, newClient *client.Client) error {
+func SetClient(c *gin.Context, newClient *client.Client) error {
 	currentClient := DB(c)
 	if currentClient != nil {
 		currentClient.Close()
@@ -40,7 +40,7 @@ func setClient(c *gin.Context, newClient *client.Client) error {
 		return nil
 	}
 
-	sessionId := getSessionId(c.Request)
+	sessionId := getSessionId(c)
 	if sessionId == "" {
 		return errors.New("Session ID is required")
 	}
@@ -108,7 +108,7 @@ func Connect(c *gin.Context) {
 
 	info, err := cl.Info()
 	if err == nil {
-		err = setClient(c, cl)
+		err = SetClient(c, cl)
 	}
 	if err != nil {
 		cl.Close()
@@ -162,7 +162,7 @@ func SwitchDb(c *gin.Context) {
 
 	info, err := cl.Info()
 	if err == nil {
-		err = setClient(c, cl)
+		err = SetClient(c, cl)
 	}
 	if err != nil {
 		cl.Close()

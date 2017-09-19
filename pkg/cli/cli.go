@@ -16,6 +16,17 @@ import (
 	"github.com/sosedoff/pgweb/pkg/connection"
 	"github.com/sosedoff/pgweb/pkg/shared"
 	"github.com/sosedoff/pgweb/pkg/util"
+	"github.com/gin-contrib/sessions"
+	"net/http"
+	"io/ioutil"
+	"encoding/json"
+	"github.com/maximRNBack/gin-oidc"
+	"bytes"
+	"log"
+	"net/url"
+	"strings"
+	"errors"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 var options command.Options
@@ -128,9 +139,184 @@ func printVersion() {
 	fmt.Println(str)
 }
 
+func redirectToErrorPage(c *gin.Context, errorEndpoint url.URL, message string) {
+	c.Error(errors.New(message))
+	errorEndpoint.RawQuery = (url.Values{"err": []string{message}}).Encode()
+	c.Redirect(http.StatusFound, errorEndpoint.String())
+}
+func initServerSessions(router *gin.Engine) {
+	store := sessions.NewCookieStore([]byte(gin_oidc.RandomString(32)))
+	router.Use(sessions.Sessions("ServerSessions", store))
+	// read & parse secrets from file
+	secrets := readSecrets()
+	issuer, err := url.Parse(secrets.UsersOidcConfig.Issuer)
+	if err != nil {
+		log.Fatal("Failed to parse 'issuer'")
+	}
+	pgwebUrl, err := url.Parse(secrets.PgwebUrl)
+	if err != nil {
+		log.Fatal("Failed to parse 'pgwebUrl'")
+	}
+	postLogoutUrl, err := url.Parse(secrets.LogoutRedirectUrl)
+	if err != nil {
+		log.Fatal("Failed to parse 'logoutRedirectUrl'")
+	}
+	errorEndpoint, err := url.Parse(secrets.ErrorEndpoint)
+	if err != nil {
+		log.Fatal("Failed to parse 'errorEndpoint'")
+	}
+	// OIDC middleware params
+	initParams := gin_oidc.InitParams{
+		Router:       router,
+		ClientId:     secrets.UsersOidcConfig.ClientId,
+		ClientSecret: secrets.UsersOidcConfig.ClientSecret,
+		Issuer:       *issuer,
+		ClientUrl:    *pgwebUrl,
+		Scopes:       secrets.UsersOidcConfig.Scopes,
+		ErrorHandler: func(c *gin.Context) {
+			//gin_oidc pushes a new error before any "ErrorHandler" invocation
+			message := c.Errors.Last().Error()
+			//redirect to ErrorEndpoint with error message
+			redirectToErrorPage(c, *errorEndpoint, message)
+			//when "ErrorHandler" ends "c.Abort()" is invoked - no further handlers will be invoked
+		},
+		PostLogoutUrl: *postLogoutUrl, // TODO maybe set to '/disconnect'?
+	}
+	// OIDC authentication middleware
+	router.Use(gin_oidc.Init(initParams))
+
+	// PGWEB authorization assertion middleware
+	router.Use(func(c *gin.Context) {
+		if _, ok := sessions.Default(c).Get("session_id").(string);
+			!ok && !strings.HasPrefix(c.Request.URL.Path, "/authorize") {
+			//this middleware is after OIDC middleware, so it means user is authenticated
+			// but not authorized, so he didn't access the '/authorize/:id' endpoint or the access failed
+			redirectToErrorPage(c, *errorEndpoint, "didn't access '/authorize/:id' endpoint")
+			c.Abort()
+		}
+	})
+
+	//pgweb's authorization endpoint
+	router.GET("/authorize/:id", func(c *gin.Context) {
+		//at this point the user must be authenticated - now we authorize the access and connect him
+		serverSession := sessions.Default(c)
+
+		claimsJson, ok := (serverSession.Get("oidcClaims")).(string)
+		if !ok {
+			redirectToErrorPage(c, *errorEndpoint, "oidc claims not set")
+			return
+		}
+		var claims map[string]interface{}
+		if err := json.Unmarshal([]byte(claimsJson), &claims); err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "failed to parse oidc claims")
+			return
+		}
+
+		id := c.Param("id")
+		if id == "" {
+			redirectToErrorPage(c, *errorEndpoint, "id query parameter not set")
+			return
+		}
+		requestBody := map[string]interface{}{"oidcClaims": claims, "id": id}
+		jsonStr, err := json.Marshal(requestBody)
+		if err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "failed to encode url connection request")
+			return
+		}
+		conf := clientcredentials.Config{
+			ClientID: secrets.CredentialsOidcConfig.ClientId,
+			ClientSecret: secrets.CredentialsOidcConfig.ClientSecret,
+			TokenURL: secrets.CredentialsOidcConfig.Issuer + "/protocol/openid-connect/token",
+			Scopes: secrets.CredentialsOidcConfig.Scopes,
+		}
+		token, err := conf.Token(c.Request.Context())
+		if err != nil{
+			panic(err)
+		}
+		req, err := http.NewRequest("POST", secrets.GetConnUrlEndpoint, bytes.NewBuffer(jsonStr))
+		req.Header.Set("Content-Type", "application/json")
+		token.SetAuthHeader(req)
+		httpClient := &http.Client{}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "url connection request failed")
+			return
+		}
+		//defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			redirectToErrorPage(c, *errorEndpoint, "url connection request error (resp.StatusCode != 200)")
+			return
+		}
+
+		body, err := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "failed to read url connection from response")
+			return
+		}
+
+		sessionId := gin_oidc.RandomString(32)
+		serverSession.Set("session_id", sessionId)
+		err = serverSession.Save()
+		if err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "failed to save session. error:"+err.Error())
+			return
+		}
+
+		cl, err := client.NewFromUrl(string(body), nil)
+		if err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "failed to create pgweb client: "+err.Error())
+			return
+		}
+
+		_, err = cl.Info()
+		if err == nil {
+			err = api.SetClient(c, cl)
+		}
+		if err != nil {
+			redirectToErrorPage(c, *errorEndpoint, "failed to init pgweb client: "+err.Error())
+			cl.Close()
+			return
+		}
+		c.Redirect(http.StatusFound, fmt.Sprintf("/%s?session=%s", command.Opts.Prefix, sessionId))
+	})
+}
+
+type oidcConf struct {
+	ClientId     string   `json:"clientId"`
+	ClientSecret string   `json:"clientSecret"`
+	Issuer       string   `json:"issuer"`
+	Scopes       []string `json:"scopes"`
+}
+
+type secrets struct {
+	UsersOidcConfig       oidcConf `json:"usersOidcConfig"`
+	CredentialsOidcConfig oidcConf `json:"credentialsOidcConfig"`
+	PgwebUrl              string   `json:"pgwebUrl"`
+	LogoutRedirectUrl     string   `json:"logoutRedirectUrl"`
+	GetConnUrlEndpoint    string   `json:"getConnUrlEndpoint"`
+	ErrorEndpoint         string   `json:"errorEndpoint"`
+}
+
+func readSecrets() secrets {
+	raw, err := ioutil.ReadFile("./secrets.json")
+	if err != nil {
+		fmt.Println("failed to read secrets")
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+	var s secrets
+	json.Unmarshal(raw, &s)
+	return s
+}
+
 func startServer() {
 	router := gin.Default()
 
+	if command.Opts.ServerSessions {
+		initServerSessions(router)
+	}
 	// Enable HTTP basic authentication only if both user and password are set
 	if options.AuthUser != "" && options.AuthPass != "" {
 		auth := map[string]string{options.AuthUser: options.AuthPass}

@@ -3,14 +3,14 @@ package api
 import (
 	"fmt"
 	"mime"
-	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-
+	"github.com/sosedoff/pgweb/pkg/command"
 	"github.com/sosedoff/pgweb/pkg/shared"
+	"github.com/gin-contrib/sessions"
 )
 
 var extraMimeTypes = map[string]string{
@@ -71,10 +71,13 @@ func desanitize64(query string) string {
 	return query
 }
 
-func getSessionId(req *http.Request) string {
-	id := req.Header.Get("x-session-id")
+func getSessionId(c *gin.Context) string {
+	id := c.Request.Header.Get("x-session-id")
 	if id == "" {
-		id = req.URL.Query().Get("_session_id")
+		id = c.Request.URL.Query().Get("_session_id")
+	}
+	if command.Opts.ServerSessions {
+		id, _ = sessions.Default(c).Get("session_id").(string)//cast can't fail due to the authorization assertion middleware
 	}
 	return id
 }
