@@ -84,6 +84,13 @@ func ConnectWithBackend(c *gin.Context) {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	if command.Opts.ConnectWithHeader != "" {
+		req.Header.Set(command.Opts.ConnectWithHeader, c.Request.Header.Get(command.Opts.ConnectWithHeader))
+		if command.Opts.Debug {
+			fmt.Printf("\nconnect-backend with header: %s: %s\n", command.Opts.ConnectWithHeader, c.Request.Header.Get(command.Opts.ConnectWithHeader))
+		}
+	}
+
 	if command.Opts.ConnectTokenConf != "" {
 		token, err := command.Config.Token(c.Request.Context())
 		if err != nil {

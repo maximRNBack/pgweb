@@ -34,6 +34,7 @@ type Options struct {
 	ConnectBackend    string `long:"connect-backend" description:"Enable database authentication through a third party backend"`
 	ConnectToken      string `long:"connect-token" description:"Authentication token for the third-party connect backend"`
 	ConnectTokenConf  string `long:"connect-token-conf" description:"OAuth configuration json relative path. token for the third-party connect backend"`
+	ConnectWithHeader string `long:"connect-with-header" description:"Name of http header to forward from browser request to request sent to the third-party connect backend"`
 }
 
 var Opts Options
