@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jessevdk/go-flags"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 type Options struct {
@@ -32,9 +33,11 @@ type Options struct {
 	DisablePrettyJson bool   `long:"no-pretty-json" description:"Disable JSON formatting feature for result export" default:"false"`
 	ConnectBackend    string `long:"connect-backend" description:"Enable database authentication through a third party backend"`
 	ConnectToken      string `long:"connect-token" description:"Authentication token for the third-party connect backend"`
+	ConnectTokenConf  string `long:"connect-token-conf" description:"OAuth configuration json relative path. token for the third-party connect backend"`
 }
 
 var Opts Options
+var Config clientcredentials.Config
 
 func ParseOptions() error {
 	_, err := flags.ParseArgs(&Opts, os.Args)
@@ -71,8 +74,8 @@ func ParseOptions() error {
 		if !Opts.Sessions {
 			return errors.New("--sessions flag must be set")
 		}
-		if Opts.ConnectToken == "" {
-			return errors.New("--connect-token flag must be set")
+		if Opts.ConnectToken == "" && Opts.ConnectTokenConf == "" {
+			return errors.New("--connect-token or --connect-token-conf flag must be set")
 		}
 	}
 

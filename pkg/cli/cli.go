@@ -16,6 +16,8 @@ import (
 	"github.com/sosedoff/pgweb/pkg/connection"
 	"github.com/sosedoff/pgweb/pkg/shared"
 	"github.com/sosedoff/pgweb/pkg/util"
+	"io/ioutil"
+	"encoding/json"
 )
 
 var options command.Options
@@ -123,6 +125,17 @@ For proper read-only access please follow postgresql role management documentati
 	printVersion()
 }
 
+func initConnectTokenConfig() {
+	raw, err := ioutil.ReadFile(options.ConnectTokenConf)
+	if err != nil {
+		exitWithMessage("failed to read ConnectTokenConf json file \n " + err.Error())
+	}
+	err = json.Unmarshal(raw, &command.Config)
+	if err != nil {
+		exitWithMessage("failed to parse (unmarshal) ConnectTokenConf json file \n " + err.Error())
+	}
+}
+
 func printVersion() {
 	str := fmt.Sprintf("Pgweb v%s", command.VERSION)
 	if command.GitCommit != "" {
@@ -190,6 +203,10 @@ func Run() {
 	// Print memory usage every 30 seconds with debug flag
 	if options.Debug {
 		util.StartProfiler()
+	}
+
+	if options.ConnectTokenConf != "" {
+		initConnectTokenConfig()
 	}
 
 	startServer()

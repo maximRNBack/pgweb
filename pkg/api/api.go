@@ -83,6 +83,19 @@ func ConnectWithBackend(c *gin.Context) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	if command.Opts.ConnectTokenConf != "" {
+		token, err := command.Config.Token(c.Request.Context())
+		if err != nil {
+			c.JSON(400, err)
+			return
+		}
+		token.SetAuthHeader(req)
+		if command.Opts.Debug {
+			fmt.Printf("\nconnect-backend access token: %s\n", token.AccessToken)
+		}
+	}
+
 	resp, err := http.DefaultClient.Do(req)
 
 	if err != nil {
