@@ -74,10 +74,17 @@ func GetSessions(c *gin.Context) {
 }
 
 func ConnectWithBackend(c *gin.Context) {
-	resp, err := http.PostForm(command.Opts.ConnectBackend, neturl.Values{
+	req, err := http.NewRequest("POST", command.Opts.ConnectBackend, strings.NewReader((neturl.Values{
 		"resource": {c.Param("resource")},
 		"token":    {command.Opts.ConnectToken},
-	})
+	}).Encode()))
+	if err != nil {
+		c.JSON(400, err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+
 	if err != nil {
 		c.JSON(400, err)
 		return
